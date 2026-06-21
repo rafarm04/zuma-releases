@@ -1,0 +1,88 @@
+name: Release Zuma
+
+# Compila el código privado (PuntoDeVenta_Frontend) y publica un release FIRMADO
+# en este repo público, con latest.json para el auto-update de la app.
+#
+# Requisitos (Settings de ESTE repo):
+#   - Secret SOURCE_PAT: token con permiso de lectura (contents:read) sobre el
+#     repo privado del código.
+#   - Secrets TAURI_SIGNING_PRIVATE_KEY y TAURI_SIGNING_PRIVATE_KEY_PASSWORD.
+#   - Variable VITE_API_URL.
+#
+# Disparo manual: Actions -> "Release Zuma" -> Run workflow (opcional: ref del código).
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Rama o tag del código a compilar"
+        required: false
+        default: main
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest
+            args: "--target universal-apple-darwin"
+            rust_targets: "aarch64-apple-darwin,x86_64-apple-darwin"
+          - platform: windows-latest
+            args: ""
+            rust_targets: ""
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+      - name: Checkout del codigo privado
+        uses: actions/checkout@v4
+        with:
+          repository: rafarm04/PuntoDeVenta_Frontend
+          ref: ${{ inputs.ref }}
+          token: ${{ secrets.SOURCE_PAT }}
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_targets }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Configurar VITE_API_URL (.env.production)
+        shell: bash
+        run: |
+          if [ -z "${{ vars.VITE_API_URL }}" ]; then
+            echo "::error::Falta la variable de repo VITE_API_URL (Settings -> Variables)."
+            exit 1
+          fi
+          echo "VITE_API_URL=${{ vars.VITE_API_URL }}" > .env.production
+
+      - name: Build + publicar release firmado
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          args: ${{ matrix.args }}
+          tagName: zuma-v__VERSION__
+          releaseName: "Zuma v__VERSION__"
+          releaseBody: "Actualizacion de Zuma. La app se actualiza sola al abrir."
+          releaseDraft: false
+          prerelease: false
