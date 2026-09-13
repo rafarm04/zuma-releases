@@ -10,6 +10,13 @@ name: Release Zuma
 #   - Variable VITE_API_URL.
 #
 # Disparo manual: Actions -> "Release Zuma" -> Run workflow (opcional: ref del código).
+#
+# Si vas a volver a correrlo para la MISMA versión (p. ej. el primer intento
+# falló a medias), borra el release y el tag de esa versión ANTES de
+# reintentar (Releases -> zuma-vX.Y.Z -> Delete, y `git push --delete origin
+# zuma-vX.Y.Z` si el tag quedó). tauri-action fusiona con el latest.json que
+# ya exista en el release; dejar assets de un intento previo a medias es
+# justo el escenario que produjo el incidente de la firma vieja de v0.5.0.
 
 on:
   workflow_dispatch:
@@ -26,6 +33,18 @@ jobs:
   build:
     strategy:
       fail-fast: false
+      # Los dos jobs suben artefactos AL MISMO release y cada uno lee-modifica-
+      # reescribe el latest.json compartido para fusionar su plataforma. Con
+      # los dos corriendo en paralelo (el de macOS tarda más: compila
+      # universal-apple-darwin, dos arquitecturas), el que termina último
+      # puede escribir con una lectura de latest.json más vieja que la del
+      # otro job, pisando su firma recién generada con una plataforma que ya
+      # había quedado desactualizada. Pasó de verdad: v0.5.0 se publicó con
+      # la firma de macOS de un build ~17h más viejo que el .tar.gz que
+      # terminó publicado, y el updater rechazaba la descarga (silenciado
+      # como "revisa tu conexión" del lado de la app). max-parallel: 1 corre
+      # los jobs uno a la vez, así nunca compiten por el mismo archivo.
+      max-parallel: 1
       matrix:
         include:
           - platform: macos-latest
